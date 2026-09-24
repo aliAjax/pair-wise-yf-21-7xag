@@ -1,128 +1,149 @@
-import "./styles.css";
+import { useMemo, useState } from "react";
+import type { Origin } from "./types";
+import { useArchive } from "./store";
+import { rugProgress } from "./domain";
+import RugList from "./components/RugList";
+import RugDetail from "./components/RugDetail";
+import NewRugForm from "./components/NewRugForm";
+import ColorCard, { colorUsage } from "./components/ColorCard";
+import Toasts from "./components/Toasts";
 
-const project = {
-  "sourceNo": 2,
-  "id": "hxyfront-62009",
-  "port": 62009,
-  "title": "地毯修复纹样档案",
-  "domain": "手工地毯修复",
-  "prompt": "做一个给手工地毯修复工作室使用的纹样与修复档案前端项目，可以记录地毯产地、年代、结密度、材质、染色类型、破损区域、补线颜色和修复工序。页面需要有纹样局部标记图、修复前后记录、材料色卡、工序进度和按产地筛选的档案列表。",
-  "palette": [
-    "#7c2d12",
-    "#b45309",
-    "#0f766e"
-  ],
-  "metrics": [
-    "待修复",
-    "纹样档案",
-    "色卡数量",
-    "完工率"
-  ],
-  "filters": [
-    "波斯",
-    "安纳托利亚",
-    "高加索",
-    "藏毯"
-  ],
-  "fields": [
-    "地毯产地",
-    "年代",
-    "结密度",
-    "材质",
-    "染色类型",
-    "破损区域"
-  ],
-  "records": [
-    [
-      "CAR-092",
-      "波斯",
-      "羊毛，约1960s",
-      "边缘磨损待补线"
-    ],
-    [
-      "CAR-117",
-      "安纳托利亚",
-      "植物染，结密度42",
-      "中心纹样缺口"
-    ],
-    [
-      "CAR-138",
-      "藏毯",
-      "局部褪色",
-      "需匹配靛蓝色卡"
-    ]
-  ]
-};
+export default function App() {
+  const archive = useArchive();
+  const { state } = archive;
+  const [filter, setFilter] = useState<Origin | "全部">("全部");
+  const [selectedId, setSelectedId] = useState<string | null>(state.rugs[0]?.id ?? null);
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
 
-function App() {
+  const rug = state.rugs.find((r) => r.id === selectedId) ?? state.rugs[0] ?? null;
+
+  const metrics = useMemo(() => {
+    const doing = state.rugs.filter((r) => r.status === "修复中").length;
+    const areas = state.rugs.reduce((n, r) => n + r.areas.length, 0);
+    const emptyColors = state.colors.filter((c) => c.stock <= 0).length;
+    const finishedRugs = state.rugs.filter(
+      (r) => r.status === "待验收" || r.status === "已验收",
+    ).length;
+    const finishRate = state.rugs.length
+      ? Math.round((finishedRugs / state.rugs.length) * 100)
+      : 0;
+    return [
+      { label: "修复中", value: doing },
+      { label: "纹样档案", value: state.rugs.length },
+      { label: "破损区域", value: areas },
+      { label: "色卡 可用/总数", value: `${state.colors.length - emptyColors}/${state.colors.length}` },
+      { label: "完工待验收率", value: `${finishRate}%` },
+    ];
+  }, [state]);
+
+  const usedByCode = colorUsage(state.rugs.map((r) => r.areas));
+
+  function handleFilter(f: Origin | "全部") {
+    setFilter(f);
+    // 筛选后若当前毯子不在结果中，自动选结果中的第一块
+    if (rug) {
+      const inView = f === "全部" || rug.origin === f;
+      if (!inView) {
+        const next = state.rugs.find((r) => r.origin === (f as Origin)) ?? null;
+        setSelectedId(next?.id ?? null);
+        setSelectedAreaId(null);
+      }
+    }
+  }
+
   return (
     <main className="app">
-      <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
-      </section>
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">▦</span>
+          <div>
+            <h1>纹样与修复档案</h1>
+            <p>手工地毯修复工作室 · 补线色号按区派料，工序与用线对得上</p>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <NewRugForm
+            onCreate={(input) => {
+              const id = archive.addRug(input);
+              setSelectedId(id);
+              setFilter("全部");
+              setSelectedAreaId(null);
+              return id;
+            }}
+          />
+          <button type="button" className="ghost" onClick={archive.resetDemo}>
+            重置示例数据
+          </button>
+        </div>
+      </header>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[28, 6, 14, 91][index] ?? 10}</strong>
+        {metrics.map((m) => (
+          <article key={m.label}>
+            <small>{m.label}</small>
+            <strong>{m.value}</strong>
           </article>
         ))}
       </section>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}分类</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <div className="layout">
+        <RugList
+          rugs={state.rugs}
+          colors={state.colors}
+          filter={filter}
+          counts={archive.counts}
+          selectedId={rug?.id ?? null}
+          onFilter={handleFilter}
+          onSelect={(r) => {
+            setSelectedId(r.id);
+            setSelectedAreaId(null);
+          }}
+        />
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存记录</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
+        <div className="main-col">
+          {rug ? (
+            <RugDetail
+              key={rug.id}
+              rug={rug}
+              colors={state.colors}
+              selectedAreaId={selectedAreaId}
+              onSelectArea={setSelectedAreaId}
+              onAddArea={(x, y) => archive.addArea(rug.id, x, y)}
+              onPatchArea={(areaId, patch) => archive.updateArea(rug.id, areaId, patch)}
+              onAssign={(areaId, code) => archive.assignColor(rug.id, areaId, code)}
+              onUnassign={(areaId) => archive.unassignColor(rug.id, areaId)}
+              onAddLog={(areaId, content) => archive.addLog(rug.id, areaId, content)}
+              onRequestAcceptance={() => archive.requestAcceptance(rug.id)}
+              onApprove={() => archive.setStatus(rug.id, "已验收")}
+            />
+          ) : (
+            <section className="panel empty-state">
+              <p>还没有地毯档案，先新建一块，再到纹样图上圈破损区域。</p>
+            </section>
+          )}
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>近期记录</p>
-            <h2>工作台摘要</h2>
-          </div>
-          <button>导出CSV</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
+          <section className="panel color-panel">
+            <div className="panel-head">
               <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
+                <h2>材料色卡</h2>
+                <span className="muted">库存为 0 的色号无法再派出；数字为余线卷数</span>
               </div>
-            </article>
-          ))}
+            </div>
+            <ColorCard colors={state.colors} usedByCode={usedByCode} />
+            {rug && (
+              <p className="hint">
+                当前在看：{rug.code}，补色进度 {rugProgress(rug).assigned}/{rugProgress(rug).total}
+              </p>
+            )}
+          </section>
         </div>
-      </section>
+      </div>
+
+      <footer className="foot">
+        规则：已写完工序记录的区域视为已开工，色号锁定不可改；所有破损区域补齐色号后才能标待验收。数据保存在本浏览器。
+      </footer>
+
+      <Toasts toasts={archive.toasts} onDismiss={archive.dismissToast} />
     </main>
   );
 }
-
-export default App;
